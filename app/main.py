@@ -114,16 +114,16 @@ async def genSbom(request: Request):
 @rateLimited(maxCalls=10, timeFrame=60)
 async def dtSend(request: Request):
     if FExist.fileExist('/code/sbom.xml'):
-            headers = {"X-Api-Key": apiKey, "accept": "application/json"}
+        headers = {"X-Api-Key": apiKey, "accept": "application/json"}
 
-            files = {
-                'autoCreate':       (None, 'true'),
-                'projectName':      (None, project_name+'/'+project_rep),
-                'projectVersion':   (None, project_branch),
-                'bom':              ('sbom.xml', open('/code/sbom.xml', 'rb'), 'application/xml')
-            }
+        files = {
+            'autoCreate':       (None, 'true'),
+            'projectName':      (None, project_name+'/'+project_rep),
+            'projectVersion':   (None, project_branch),
+            'bom':              ('sbom.xml', open('/code/sbom.xml', 'rb'), 'application/xml')
+        }
 
-            response = requests.post( project_ip + '/api/v1/bom', 
-                                    headers=headers, 
-                                    files=files )
+        response = requests.post( project_ip + '/api/v1/bom', 
+                                headers=headers, 
+                                files=files )
     return { "result": "success" } if FExist.fileExist('/code/sbom.xml') else { "result": "file with sbom does not exist" }
