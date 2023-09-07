@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cdx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cdx
+  template:
+    metadata:
+      labels:
+        app: cdx
+    spec:
+      containers:
+      - name: cdx
+        image: axidex/api1 # cyclonedx/cyclonedx-gomod
+        env:
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: my-api-secret
+              key: api-key
+        - name: IP_DT
+          valueFrom:
+            configMapKeyRef:
+              name: cfg
+              key: dtip
+        - name: BRANCH_DT
+          valueFrom:
+            configMapKeyRef:
+              name: cfg
+              key: branch
+        - name: NAME_DT
+          valueFrom:
+            configMapKeyRef:
+              name: cfg
+              key: name
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cdx-service
+spec:
+  selector:
+    app: cdx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: LoadBalancer

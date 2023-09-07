@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dependency-track
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dependency-track
+  template:
+    metadata:
+      labels:
+        app: dependency-track
+    spec:
+      containers:
+      - name: dependency-track
+        image: dependencytrack/bundled
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: dependency-track-volume
+          mountPath: /data
+      volumes:
+      - name: dependency-track-volume
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dependency-track-service
+spec:
+  type: NodePort
+  selector:
+    app: dependency-track
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+      nodePort: 30200

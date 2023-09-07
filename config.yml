@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cfg
+data:
+  dtip:     http://dependency-track:8080
+  branch:   master
+  name:     https://github.com/0c34/govwa
