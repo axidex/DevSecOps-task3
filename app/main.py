@@ -16,8 +16,6 @@ apiKey          = str(os.environ["API_KEY"])
 axidex_username = "axidex"
 axidex_password = str(os.environ["PASSWORD_AUTH"])
 
-# print(project_name, project_rep, project_branch, project_ip, apiKey, git_name)
-
 # Path finding methods
 ######################
 class FExist: 
@@ -31,20 +29,27 @@ class FExist:
 
 # Sender to dependency track via cUrl
 #####################################
-# def dtSend(request: Request):
-#     headers = {"X-Api-Key": apiKey, "accept": "application/json"}
+def dtSend(projectName: str, projectRep: str, projectBranch: str, headers: str):
 
-#     files = {
-#         'autoCreate':       (None, 'true'),
-#         'projectName':      (None, project_name+'/'+project_rep),
-#         'projectVersion':   (None, project_branch),
-#         'bom':              ('sbom.xml', open('/code/sbom.xml', 'rb'), 'application/xml')
-#     }
+    files = {
+        'autoCreate':       (None, 'true'),
+        'projectName':      (None, projectName+'/'+projectRep),
+        'projectVersion':   (None, projectBranch),
+        'bom':              ('sbom.xml', open('/code/sbom.xml', 'rb'), 'application/xml')
+    }
 
-#     response = requests.post( project_ip + '/api/v1/bom', 
-#                             headers=headers, 
-#                             files=files )
+    response = requests.post( project_ip + '/api/v1/bom', 
+                              headers=headers, 
+                              files=files )
 
+def uuidGet(gitName: str, gitRep: str, gitBranch: str, headers: str):
+    uuid_resp = 'not_found'
+    resp = requests.get(project_ip + '/api/v1/project', headers=headers)
+    parsed = json.loads(resp.content)
+    for el in parsed:
+        if el['name'] == gitName+'/'+gitRep and el['version'] == gitBranch:
+            uuid_resp  = el["uuid"]
+    return uuid_resp
 # FastAPI
 #########
 app = FastAPI()
@@ -70,8 +75,10 @@ def rateLimited(maxCalls: int, timeFrame: int):
         async def wrapper(*args, **kwargs):
             now = time.time()
             callsInTimeFrame = [call for call in calls if call > now - timeFrame]
+
             if len(callsInTimeFrame) >= maxCalls:
                 raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
+            
             calls.append(now)
             return await func(*args, **kwargs)
         return wrapper
@@ -107,44 +114,31 @@ async def readRoot(user: dict = Depends(authenticate_user)):
 @app.post("/sca") # 0c34 govwa
 @rateLimited(maxCalls=10, timeFrame=60)
 async def sca(data: MyDataModel, user: dict = Depends(authenticate_user)):
-
+    headers = {"X-Api-Key": apiKey, "accept": "application/json"}
     gitUrl = data.website_url
-    gitBranch = data.git_branch
-    if (len(gitUrl)*len(gitBranch) == 0):
-        return { "result": "gitUrl and gitBranch error"}
-    repPath = "/code/" + str(uuid.uuid4())
-
     gitName = gitUrl.split('/')[-2]
     gitRep  = gitUrl.split('/')[-1]
+    gitBranch = data.git_branch
+    repPath = "/code/" + str(uuid.uuid4())
+    
     Repo.clone_from(gitUrl, repPath, branch=gitBranch)
-    headers = {"X-Api-Key": apiKey, "accept": "application/json"}
+
     if FExist.folderExist(repPath):
         os.system('./cyclonedx-gomod app -output ./sbom.xml ' + repPath)
     else:
         return { "result": "the folder with repository does not exist"}
     
-    if FExist.fileExist('/code/sbom.xml'):
-        files = {
-            'autoCreate':       (None, 'true'),
-            'projectName':      (None, gitName+'/'+gitRep),
-            'projectVersion':   (None, gitBranch),
-            'bom':              ('sbom.xml', open('/code/sbom.xml', 'rb'), 'application/xml')
-        }
+    headers = {"X-Api-Key": apiKey, "accept": "application/json"}
 
-        response = requests.post( project_ip + '/api/v1/bom', 
-                                headers=headers, 
-                                files=files )
+    if FExist.fileExist('/code/sbom.xml'):
+        dtSend(gitName, gitRep, gitBranch, headers)
     else:
         return { "result": "file with sbom does not exist" }
+    
     try:
         shutil.rmtree(repPath)
-        print(f"Folder {repPath} successfully deleted.")
     except OSError as e:
         print(f"Warning with deleting {repPath}: {e}")
-    uuid_resp = 'not_found'
-    resp = requests.get(project_ip + '/api/v1/project', headers=headers)
-    parsed = json.loads(resp.content)
-    for el in parsed:
-        if el['name'] == gitName+'/'+gitRep and el['version'] == gitBranch:
-            uuid_resp  = el["uuid"]
-    return { "result": uuid_resp }
+    
+    uuidResp = uuidGet(gitName, gitRep, gitBranch, headers)
+    return { "result": uuidResp }
