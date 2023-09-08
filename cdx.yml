@@ -15,12 +15,24 @@ spec:
       containers:
       - name: cdx
         image: axidex/api1 # cyclonedx/cyclonedx-gomod
+        resources:
+          requests:
+            cpu: "150m"
+            memory: "150Mi"
+          limits:
+            cpu: "1000m"      # Ограничение на использование CPU
+            memory: "2000Mi"
         env:
         - name: API_KEY
           valueFrom:
             secretKeyRef:
               name: my-api-secret
               key: api-key
+        - name: PASSWORD_AUTH
+          valueFrom:
+            secretKeyRef:
+              name: my-api-secret
+              key: password
         - name: IP_DT
           valueFrom:
             configMapKeyRef:

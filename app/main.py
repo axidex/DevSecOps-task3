@@ -1,19 +1,21 @@
-from fastapi import FastAPI, HTTPException, Request, status, Depends
+from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from pydantic import BaseModel, HttpUrl
 
 from git import Repo
-import os, requests, time
+import os, requests, time, json, shutil, uuid
 from functools import wraps
 
 # Constants
 ###########
-project_name    = str(os.environ["NAME_DT"]).split('/')[-2] # https://github.com/0c34/govwa https://github.com/netlify/gocommerce
-project_rep     = str(os.environ["NAME_DT"]).split('/')[-1]
-project_branch  = str(os.environ["BRANCH_DT"])
+# # https://github.com/0c34/govwa https://github.com/netlify/gocommerce
 project_ip      = str(os.environ["IP_DT"])
 apiKey          = str(os.environ["API_KEY"])
-git_name        = "https://github.com/" + project_name + "/" + project_rep
+
+axidex_username = "axidex"
+axidex_password = str(os.environ["PASSWORD_AUTH"])
+
 # print(project_name, project_rep, project_branch, project_ip, apiKey, git_name)
 
 # Path finding methods
@@ -59,71 +61,90 @@ app.add_middleware(
 
 # Limiter
 #########
+# https://youtu.be/49oC1uHxJ-o?si=YbChXV5XsxJA75eQ
 def rateLimited(maxCalls: int, timeFrame: int):
     def decorator(func):
         calls = []
 
         @wraps(func)
-        async def wrapper(request: Request, *args, **kwargs):
+        async def wrapper(*args, **kwargs):
             now = time.time()
             callsInTimeFrame = [call for call in calls if call > now - timeFrame]
             if len(callsInTimeFrame) >= maxCalls:
                 raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
             calls.append(now)
-            return await func(request, *args, **kwargs)
+            return await func(*args, **kwargs)
         return wrapper
     return decorator
 
-# FastAPI Security
+# FastAPI Security 
 ##################
 security = HTTPBasic()
-fake_users_db = {
-    "axidex": {
-        "username": "axidex",
-        "password": "333",
+users_db = {
+    axidex_username: {
+        "password": axidex_password,
     }
 }
-
 def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
-    user = fake_users_db.get(credentials.username)
+    user = users_db.get(credentials.username)
     if user is None or user["password"] != credentials.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return user
+
+# Pydantic
+##########
+class MyDataModel(BaseModel):
+    website_url: HttpUrl 
+    git_branch: str
 
 # FastAPI Methods
 #################
 @app.get("/")
 @rateLimited(maxCalls=10, timeFrame=60)
-async def readRoot(request: Request, user: dict = Depends(authenticate_user)):
+async def readRoot(user: dict = Depends(authenticate_user)):
     return {"Documentation in": "/docs"}
 
-@app.post("/sca/git") # 0c34 govwa
+@app.post("/sca") # 0c34 govwa
 @rateLimited(maxCalls=10, timeFrame=60)
-async def cloneRep(request: Request):
-    Repo.clone_from(git_name, "./rep", branch=project_branch)
-    return { "result": "success" }
+async def sca(data: MyDataModel, user: dict = Depends(authenticate_user)):
 
-@app.get("/sca/sbom")
-@rateLimited(maxCalls=10, timeFrame=60)
-async def genSbom(request: Request):
-    if FExist.folderExist('/code/rep'):
-        os.system('./cyclonedx-gomod app -output ./sbom.xml ./rep')
-    return { "result": "success" } if FExist.folderExist('/code/rep')   else { "result": "the folder with repository does not exist"}
+    gitUrl = data.website_url
+    gitBranch = data.git_branch
+    if (len(gitUrl)*len(gitBranch) == 0):
+        return { "result": "gitUrl and gitBranch error"}
+    repPath = "/code/" + str(uuid.uuid4())
 
-@app.get("/sca/dt")
-@rateLimited(maxCalls=10, timeFrame=60)
-async def dtSend(request: Request):
+    gitName = gitUrl.split('/')[-2]
+    gitRep  = gitUrl.split('/')[-1]
+    Repo.clone_from(gitUrl, repPath, branch=gitBranch)
+    headers = {"X-Api-Key": apiKey, "accept": "application/json"}
+    if FExist.folderExist(repPath):
+        os.system('./cyclonedx-gomod app -output ./sbom.xml ' + repPath)
+    else:
+        return { "result": "the folder with repository does not exist"}
+    
     if FExist.fileExist('/code/sbom.xml'):
-        headers = {"X-Api-Key": apiKey, "accept": "application/json"}
-
         files = {
             'autoCreate':       (None, 'true'),
-            'projectName':      (None, project_name+'/'+project_rep),
-            'projectVersion':   (None, project_branch),
+            'projectName':      (None, gitName+'/'+gitRep),
+            'projectVersion':   (None, gitBranch),
             'bom':              ('sbom.xml', open('/code/sbom.xml', 'rb'), 'application/xml')
         }
 
         response = requests.post( project_ip + '/api/v1/bom', 
                                 headers=headers, 
                                 files=files )
-    return { "result": "success" } if FExist.fileExist('/code/sbom.xml') else { "result": "file with sbom does not exist" }
+    else:
+        return { "result": "file with sbom does not exist" }
+    try:
+        shutil.rmtree(repPath)
+        print(f"Folder {repPath} successfully deleted.")
+    except OSError as e:
+        print(f"Warning with deleting {repPath}: {e}")
+    uuid_resp = 'not_found'
+    resp = requests.get(project_ip + '/api/v1/project', headers=headers)
+    parsed = json.loads(resp.content)
+    for el in parsed:
+        if el['name'] == gitName+'/'+gitRep and el['version'] == gitBranch:
+            uuid_resp  = el["uuid"]
+    return { "result": uuid_resp }

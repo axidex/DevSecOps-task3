@@ -31,10 +31,11 @@ metadata:
   name: dependency-track-service
 spec:
   type: NodePort
-  selector:
+  selector: 
     app: dependency-track
   ports:
     - protocol: TCP
+      name: front
       port: 8080
       targetPort: 8080
       nodePort: 30200
